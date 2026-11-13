@@ -34,24 +34,42 @@ class DirectedGraph:
         return len(self._adjacency)
 
     @classmethod
-    def from_edge_list(cls, text: str) -> DirectedGraph:
-        """Parse a graph from text with one edge `u v` per line.
+    def from_adjacency_matrix(cls, text: str) -> DirectedGraph:
+        """Parse a graph from a whitespace-separated adjacency matrix of 0s and 1s.
 
-        A line with a single token declares an isolated vertex. Blank lines and
-        anything after `#` are ignored.
+        Row `i` lists the edges leaving vertex `i`: a 1 in column `j` is an edge
+        `i -> j`, so a 1 on the diagonal is a self-loop. An optional first line
+        names the vertices; it is recognised because it contains a non-numeric
+        token, so names cannot all be numbers. Without it, vertices are named
+        `1..n`. Blank lines and anything after `#` are ignored.
         """
+        lines = [
+            (line_number, tokens)
+            for line_number, line in enumerate(text.splitlines(), start=1)
+            if (tokens := line.split("#", 1)[0].split())
+        ]
+
+        names: list[str] | None = None
+        if lines and not all(token.isdigit() for token in lines[0][1]):
+            names = lines.pop(0)[1]
+            if len(set(names)) != len(names):
+                raise ValueError("vertex names must be unique")
+
+        size = len(lines)
+        if names is None:
+            names = [str(i) for i in range(1, size + 1)]
+        elif len(names) != size:
+            raise ValueError(f"header names {len(names)} vertices but the matrix has {size} rows")
+
         graph = cls()
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            tokens = line.split("#", 1)[0].split()
-            match tokens:
-                case []:
-                    continue
-                case [vertex]:
-                    graph.add_vertex(vertex)
-                case [source, target]:
+        for name in names:
+            graph.add_vertex(name)
+        for source, (line_number, row) in zip(names, lines, strict=True):
+            if len(row) != size:
+                raise ValueError(f"line {line_number}: expected {size} values, got {len(row)}")
+            for target, value in zip(names, row, strict=True):
+                if value not in ("0", "1"):
+                    raise ValueError(f"line {line_number}: expected 0 or 1, got {value!r}")
+                if value == "1":
                     graph.add_edge(source, target)
-                case _:
-                    raise ValueError(
-                        f"line {line_number}: expected 'u v' or 'v', got {line.strip()!r}"
-                    )
         return graph

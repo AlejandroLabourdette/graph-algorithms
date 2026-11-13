@@ -18,8 +18,18 @@ uv run ruff format .          # format
 
 ## Input format
 
-Graphs are plain text edge lists: one directed edge `u v` per line. A line with a single
-token declares an isolated vertex; blank lines and anything after `#` are ignored.
+Graphs are plain text adjacency matrices of `0`s and `1`s separated by whitespace: row `u`,
+column `v` is `1` when there is an edge `u -> v` (a `1` on the diagonal is a self-loop).
+An optional first line names the vertices (at least one name must be non-numeric); without
+it, vertices are named `1..n`. Blank lines and anything after `#` are ignored.
+
+```text
+# a -> b, b -> a, b -> c
+a b c
+0 1 0
+1 0 1
+0 0 0
+```
 
 ## Algorithms
 

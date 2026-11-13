@@ -13,7 +13,7 @@ def main(argv: list[str] | None = None) -> None:
         description="Find the strongly connected components of a directed graph with "
         "Tarjan's algorithm and render them with Graphviz."
     )
-    parser.add_argument("input", type=Path, help="edge list file: one 'u v' edge per line")
+    parser.add_argument("input", type=Path, help="adjacency matrix file of 0s and 1s")
     parser.add_argument(
         "-o",
         "--output",
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("-f", "--format", default="svg", choices=["svg", "png", "pdf"])
     args = parser.parse_args(argv)
 
-    graph = DirectedGraph.from_edge_list(args.input.read_text())
+    graph = DirectedGraph.from_adjacency_matrix(args.input.read_text())
     components = strongly_connected_components(graph)
 
     print(f"{len(components)} strongly connected components:")
