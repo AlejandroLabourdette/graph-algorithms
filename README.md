@@ -43,3 +43,14 @@ component as a labelled, colored cluster; edges between components are dashed.
 uv run tarjan examples/tarjan.txt            # writes output/tarjan.svg
 uv run tarjan examples/tarjan.txt -f png -o output/clrs
 ```
+
+Examples in `examples/`:
+
+| File | Graph |
+| --- | --- |
+| `tarjan.txt` | CLRS figure 22.9 plus a self-loop and an isolated vertex |
+| `tarjan2.txt` | Two cycles joined by one edge |
+| `tarjan3.txt` | Directed acyclic graph without header (vertices `1..n`), every vertex is its own component |
+| `tarjan4.txt` | A single cycle with chords, the whole graph is one component |
+| `tarjan5.txt` | Chain of components of different sizes, including a 2-cycle and a self-loop |
+| `tarjan6.txt` | Two disconnected parts with multi-letter vertex names |

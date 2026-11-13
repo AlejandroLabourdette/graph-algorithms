@@ -26,7 +26,8 @@ def main(argv: list[str] | None = None) -> None:
     graph = DirectedGraph.from_adjacency_matrix(args.input.read_text())
     components = strongly_connected_components(graph)
 
-    print(f"{len(components)} strongly connected components:")
+    noun = "component" if len(components) == 1 else "components"
+    print(f"{len(components)} strongly connected {noun}:")
     for i, component in enumerate(components, start=1):
         print(f"  SCC {i}: {', '.join(component)}")
 

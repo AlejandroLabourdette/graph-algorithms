@@ -1,0 +1,15 @@
+# Chain of components of different sizes: a 3-cycle, a 4-vertex component,
+# single vertices, a 2-cycle and a self-loop.
+a b c d e f g h i j k l
+0 1 0 0 0 0 0 0 0 0 0 1
+0 0 1 0 0 0 0 0 0 0 0 0
+1 0 0 1 0 0 0 0 0 0 0 0
+0 0 0 0 1 0 0 0 1 0 0 0
+0 0 0 0 0 1 1 0 0 0 0 0
+0 0 0 0 0 0 1 1 0 0 0 0
+0 0 0 1 0 0 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 1 0 0 0
+0 0 0 0 0 0 0 0 0 1 0 0
+0 0 0 0 0 0 0 0 1 0 1 0
+0 0 0 0 0 0 0 0 0 0 1 0
+0 0 0 0 0 0 0 1 0 0 0 0

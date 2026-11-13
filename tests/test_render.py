@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from graph_algorithms.cli.tarjan import main
 from graph_algorithms.graph import DirectedGraph
 from graph_algorithms.render import render_components
@@ -48,3 +52,14 @@ def test_cli_renders_image(tmp_path, capsys):
 
     assert (tmp_path / "out.svg").read_text().startswith("<?xml")
     assert "2 strongly connected components" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "example",
+    sorted((Path(__file__).parent.parent / "examples").glob("*.txt")),
+    ids=lambda path: path.name,
+)
+def test_examples_render(example, tmp_path):
+    main([str(example), "-o", str(tmp_path / example.stem), "-f", "svg"])
+
+    assert (tmp_path / f"{example.stem}.svg").exists()

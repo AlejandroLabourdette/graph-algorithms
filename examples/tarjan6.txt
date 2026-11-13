@@ -1,0 +1,10 @@
+# Two disconnected parts: mutual follows in a small social network.
+# Multi-letter vertex names are allowed.
+ana bob eva leo max sol tom
+0 1 0 0 0 0 0
+1 0 1 0 0 0 0
+1 0 0 1 0 0 0
+0 0 0 0 0 0 0
+0 0 0 0 0 1 0
+0 0 0 0 1 0 1
+0 0 0 0 1 0 0

@@ -22,7 +22,6 @@ INTER_COMPONENT_EDGE_COLOR = "#9e9e9e"
 def render_components(
     graph: DirectedGraph,
     components: list[list[str]],
-    title: str = "Strongly connected components",
 ) -> graphviz.Digraph:
     """Build a Graphviz digraph that draws each component as a labelled cluster.
 
@@ -33,16 +32,23 @@ def render_components(
 
     dot = graphviz.Digraph(name="components")
     dot.attr(
-        label=title,
-        labelloc="t",
-        fontname="Helvetica",
-        fontsize="18",
-        compound="true",
+        rankdir="LR",
         nodesep="0.5",
         ranksep="0.9",
         dpi="150",
     )
-    dot.attr("node", shape="circle", style="filled", fontname="Helvetica", penwidth="1.5")
+    # Same size for every vertex, wide enough for the longest name (in inches).
+    longest_name = max((len(vertex) for vertex in graph.vertices), default=1)
+    node_width = max(0.5, 0.12 * longest_name + 0.2)
+    dot.attr(
+        "node",
+        shape="circle",
+        style="filled",
+        fontname="Helvetica",
+        penwidth="1.5",
+        width=f"{node_width:.2f}",
+        fixedsize="true",
+    )
     dot.attr("edge", arrowsize="0.8", penwidth="1.3")
 
     for i, component in enumerate(components):
@@ -51,6 +57,7 @@ def render_components(
             cluster.attr(
                 label=f"SCC {i + 1}",
                 labeljust="l",
+                labelloc="b",
                 style="rounded,filled",
                 fillcolor=background,
                 color=border,
@@ -58,13 +65,18 @@ def render_components(
                 fontname="Helvetica-Bold",
                 fontsize="13",
                 penwidth="2",
-                margin="12",
+                margin="18",
             )
             for vertex in component:
                 cluster.node(vertex, fillcolor=fill, color=border)
 
     for source, target in graph.edges:
-        if component_of[source] == component_of[target]:
+        if source == target:
+            # A blank label makes Graphviz reserve room for the loop, which otherwise
+            # touches the cluster border.
+            border = PALETTE[component_of[source] % len(PALETTE)][2]
+            dot.edge(source, target, color=border, label=" ")
+        elif component_of[source] == component_of[target]:
             border = PALETTE[component_of[source] % len(PALETTE)][2]
             dot.edge(source, target, color=border)
         else:

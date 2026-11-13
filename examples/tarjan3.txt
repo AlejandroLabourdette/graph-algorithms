@@ -1,0 +1,8 @@
+# Directed acyclic graph: every vertex is its own strongly connected component.
+# No header line, so vertices are named 1..6.
+0 1 1 0 0 0
+0 0 0 1 0 0
+0 0 0 1 0 1
+0 0 0 0 1 0
+0 0 0 0 0 0
+0 0 0 0 1 0
