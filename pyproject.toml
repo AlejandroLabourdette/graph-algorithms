@@ -12,6 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
+petri = "graph_algorithms.cli.petri:main"
 tarjan = "graph_algorithms.cli.tarjan:main"
 
 [build-system]

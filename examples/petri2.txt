@@ -1,0 +1,16 @@
+# Weighted arcs and a conflict: assemble and discard compete for the parts in stock.
+# assemble needs 2 parts and a free machine, discard takes 1 part.
+pre
+          supply  assemble  discard  release
+stock       0        2         1        0
+machine     0        1         0        0
+product     0        0         0        1
+
+post
+          supply  assemble  discard  release
+stock       3        0         0        0
+machine     0        0         0        1
+product     0        1         0        0
+
+marking
+1 1 0

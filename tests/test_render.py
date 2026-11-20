@@ -56,7 +56,7 @@ def test_cli_renders_image(tmp_path, capsys):
 
 @pytest.mark.parametrize(
     "example",
-    sorted((Path(__file__).parent.parent / "examples").glob("*.txt")),
+    sorted((Path(__file__).parent.parent / "examples").glob("tarjan*.txt")),
     ids=lambda path: path.name,
 )
 def test_examples_render(example, tmp_path):

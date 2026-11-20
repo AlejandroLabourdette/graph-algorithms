@@ -1,0 +1,23 @@
+# Producer / consumer with a one-slot buffer.
+# Rows are places, columns are transitions. `pre` holds the tokens each transition
+# consumes, `post` the tokens it produces. Names are optional (default: p1..pn, t1..tm).
+pre
+              produce  deliver  consume  use
+ready            1        0        0      0
+produced         0        1        0      0
+empty_slot       0        1        0      0
+full_slot        0        0        1      0
+waiting          0        0        1      0
+consumed         0        0        0      1
+
+post
+              produce  deliver  consume  use
+ready            0        1        0      0
+produced         1        0        0      0
+empty_slot       0        0        1      0
+full_slot        0        1        0      0
+waiting          0        0        0      1
+consumed         0        0        1      0
+
+marking
+1 0 1 0 1 0

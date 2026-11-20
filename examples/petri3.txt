@@ -1,0 +1,30 @@
+# Two processes grabbing two shared resources in opposite order, without names
+# (places p1..p8, transitions t1..t6). Firing t1 then t4 reaches a deadlock.
+#
+# p1 A idle, p2 A holds R1, p3 A holds R1+R2
+# p4 B idle, p5 B holds R2, p6 B holds R2+R1
+# p7 R1 free, p8 R2 free
+# t1 A takes R1, t2 A takes R2, t3 A releases both
+# t4 B takes R2, t5 B takes R1, t6 B releases both
+pre
+1 0 0 0 0 0
+0 1 0 0 0 0
+0 0 1 0 0 0
+0 0 0 1 0 0
+0 0 0 0 1 0
+0 0 0 0 0 1
+1 0 0 0 1 0
+0 1 0 1 0 0
+
+post
+0 0 1 0 0 0
+1 0 0 0 0 0
+0 1 0 0 0 0
+0 0 0 0 0 1
+0 0 0 1 0 0
+0 0 0 0 1 0
+0 0 1 0 0 1
+0 0 1 0 0 1
+
+marking
+1 0 0 1 0 0 1 1
