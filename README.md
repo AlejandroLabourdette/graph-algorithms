@@ -107,3 +107,48 @@ Examples in `examples/`:
 | `petri.txt` | Producer / consumer with a one-slot buffer, runs forever |
 | `petri2.txt` | Weighted arcs and a conflict between two transitions sharing a place |
 | `petri3.txt` | Two processes taking two resources in opposite order, without names; firing `t1 t4` deadlocks |
+| `petri4.txt` | Unbounded queue: `queue` becomes ω first and `done` one level later |
+| `petri5.txt` | Bounded buffer with two slots: 2-bounded but not safe, a single cycle |
+
+### Petri net coverability analysis (Karp-Miller)
+
+Non-interactive analysis of a place/transition net (`graph_algorithms.petri_v2`) that uses the same
+input files as the token game. It builds the coverability tree, derives the coverability graph and
+analyses both, prints a report and renders two images: `<output>_arbol.<format>` and
+`<output>_grafo.<format>`. The report and the image labels are in Spanish.
+
+```sh
+uv run petri_v2 examples/petri4.txt          # writes output/petri4_arbol.svg and output/petri4_grafo.svg
+uv run petri_v2 examples/petri2.txt -f png -o output/parts
+```
+
+- **Coverability tree.** The root is the initial marking and each enabled transition creates a
+  child, breadth first. A child whose marking already appears in an earlier node is a
+  *duplicate*: it stays in the tree as a leaf and is not expanded, so the tree is always finite.
+- **Omegas.** Each new marking is compared with the markings on the path from the root. If it
+  covers an ancestor (`>=` in every place) and differs from it, the places where it is strictly
+  greater can be pumped without limit and become **ω** (ω + n = ω, ω − n = ω, ω ≥ n). The report
+  lists every node that introduces omegas, the ancestor it covers and the places.
+- **Coverability graph.** The tree with equal markings merged: duplicates become arcs back to the
+  node they repeat.
+- **Strongly connected components.** Tarjan's algorithm on the coverability graph. Cyclic
+  components are drawn as clusters; the report marks terminal components (no arc leaves them) and
+  dead markings (no enabled transition).
+- **Boundedness.** A place is unbounded when ω appears in it; otherwise its bound is the most
+  tokens it holds in any marking. The net is bounded when every place is, and safe when every
+  bound is at most 1.
+
+With `-i` (`--interactivo`) the tree is built step by step instead: at each step it shows the
+current node, the path from the root and the enabled transitions, and you type the one to fire.
+The new marking is compared with the path (omegas are announced as they appear) and a marking that
+already exists is reported as a duplicate, which is not expanded and sends you back to its parent.
+Type `r` to go back to the parent and explore another branch, or `q` to quit; the tree
+`<output>_arbol.<format>` is redrawn at every step, with the current node in green. On exit it
+prints the tree built so far and its omegas.
+
+```sh
+uv run petri_v2 examples/petri.txt -i -f png -o output/buffer
+```
+
+In the images, markings with an ω are orange, duplicates are dashed gray leaves labelled with the
+node they repeat (`= M3`), dead markings (`muerto`) have a red border and the initial marking a thick border.
