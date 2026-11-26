@@ -9,6 +9,7 @@ connected components and the boundedness of every place.
 import math
 from collections import deque
 from dataclasses import dataclass
+from functools import cached_property
 
 from graph_algorithms.graph import DirectedGraph
 from graph_algorithms.petri import PetriNet
@@ -60,14 +61,23 @@ class TreeNode:
 
 @dataclass(frozen=True)
 class CoverabilityTree:
-    """Karp-Miller coverability tree; node ids are creation order (breadth first)."""
+    """Karp-Miller coverability tree; node ids are creation order."""
 
     places: tuple[str, ...]
     transitions: tuple[str, ...]
     nodes: tuple[TreeNode, ...]
 
+    @cached_property
+    def _children_by_parent(self) -> dict[int, list[TreeNode]]:
+        index: dict[int, list[TreeNode]] = {}
+        for node in self.nodes:
+            if node.parent is not None:
+                index.setdefault(node.parent, []).append(node)
+        return index
+
     def children(self, node_id: int) -> list[TreeNode]:
-        return [node for node in self.nodes if node.parent == node_id]
+        """Children of `node_id` in creation order (the index is built once per tree)."""
+        return list(self._children_by_parent.get(node_id, ()))
 
     def path_to(self, node_id: int) -> list[TreeNode]:
         """Nodes from the root to `node_id`, both included."""
@@ -86,16 +96,18 @@ def accelerate(
 ) -> tuple[OmegaMarking, list[Acceleration]]:
     """Replace by omega every place in which `marking` grows over an ancestor.
 
-    `marking` is compared with each marking on the path from the root. When it covers an
-    ancestor's marking (>= in every place) and differs from it, the places where it is strictly
-    greater can be pumped as often as we like, so they become omega. Turning places into omega
-    can make `marking` cover further ancestors, so the comparison repeats until nothing changes.
+    `ancestors` is the path from the root, root first. `marking` is compared with each of them,
+    nearest first, so the ancestor that gets reported is the closest one that is covered. When
+    `marking` covers an ancestor's marking (>= in every place) and differs from it, the places
+    where it is strictly greater can be pumped as often as we like, so they become omega.
+    Turning places into omega can make `marking` cover further ancestors, so the comparison
+    repeats until nothing changes.
     """
     accelerations: list[Acceleration] = []
     changed = True
     while changed:
         changed = False
-        for ancestor in ancestors:
+        for ancestor in reversed(ancestors):
             old = ancestor.marking
             if marking == old or not all(
                 new >= before for new, before in zip(marking, old, strict=True)
@@ -113,59 +125,83 @@ def accelerate(
     return marking, accelerations
 
 
-def add_child(
-    net: PetriNet,
-    nodes: list[TreeNode],
-    first_with_marking: dict[OmegaMarking, int],
-    parent: TreeNode,
-    transition: str,
-) -> TreeNode:
-    """Fire `transition` from `parent` and append the resulting node to `nodes`.
+class TreeBuilder:
+    """Grows the coverability tree of a net one node at a time.
 
-    The new marking is compared with the path from the root to introduce omegas
-    (`accelerate`). If it already appears in a node created earlier the child is a duplicate;
-    otherwise it is registered in `first_with_marking`.
+    The root holds the initial marking. `add_child` fires a transition from a node and appends
+    the result; it is used both by `build_coverability_tree` (breadth first, every enabled
+    transition) and by the interactive mode (the transition the user picks).
     """
-    marking = net.fire(parent.marking, transition)
-    marking, accelerations = accelerate(marking, _path(nodes, parent))
-    duplicate_of = first_with_marking.get(marking)
-    child = TreeNode(len(nodes), marking, parent.id, transition, duplicate_of, tuple(accelerations))
-    nodes.append(child)
-    if duplicate_of is None:
-        first_with_marking[marking] = child.id
-    return child
+
+    def __init__(self, net: PetriNet) -> None:
+        self.net = net
+        root = TreeNode(0, net.initial_marking, None, None, None, ())
+        self.nodes: list[TreeNode] = [root]
+        self._first_with_marking: dict[OmegaMarking, int] = {root.marking: root.id}
+        self._child_by_transition: dict[tuple[int, str], TreeNode] = {}
+
+    @property
+    def root(self) -> TreeNode:
+        return self.nodes[0]
+
+    def child(self, parent: TreeNode, transition: str) -> TreeNode | None:
+        """The child already created by firing `transition` from `parent`, if any."""
+        return self._child_by_transition.get((parent.id, transition))
+
+    def add_child(self, parent: TreeNode, transition: str) -> TreeNode:
+        """Fire `transition` from `parent` and append the resulting node.
+
+        The new marking is compared with the path from the root to introduce omegas
+        (`accelerate`). If it already appears in a node created earlier the child is a
+        duplicate; otherwise it becomes the node that later markings are compared against.
+        """
+        marking = self.net.fire(parent.marking, transition)
+        marking, accelerations = accelerate(marking, self._path(parent))
+        duplicate_of = self._first_with_marking.get(marking)
+        child = TreeNode(
+            len(self.nodes), marking, parent.id, transition, duplicate_of, tuple(accelerations)
+        )
+        self.nodes.append(child)
+        self._child_by_transition[(parent.id, transition)] = child
+        if duplicate_of is None:
+            self._first_with_marking[marking] = child.id
+        return child
+
+    def tree(self) -> CoverabilityTree:
+        return CoverabilityTree(self.net.places, self.net.transitions, tuple(self.nodes))
+
+    def _path(self, node: TreeNode) -> list[TreeNode]:
+        path = [node]
+        while path[-1].parent is not None:
+            path.append(self.nodes[path[-1].parent])
+        path.reverse()
+        return path
 
 
 def build_coverability_tree(net: PetriNet) -> CoverabilityTree:
     """Build the Karp-Miller coverability tree of `net`, breadth first.
 
-    Every enabled transition of an expanded node creates a child (`add_child`). A child whose
-    marking already appears in a node created earlier is a duplicate: it is kept in the tree as
-    a leaf and is not expanded.
+    Every enabled transition of an expanded node creates a child. A child whose marking
+    already appears in a node created earlier is a duplicate: it is kept in the tree as a leaf
+    and is not expanded.
     """
-    root = TreeNode(0, net.initial_marking, None, None, None, ())
-    nodes = [root]
-    first_with_marking: dict[OmegaMarking, int] = {root.marking: root.id}
-    queue = deque([root.id])
+    builder = TreeBuilder(net)
+    queue = deque([builder.root])
 
     while queue:
-        node = nodes[queue.popleft()]
+        node = queue.popleft()
         for transition in net.transitions:
             if not net.is_enabled(node.marking, transition):
                 continue
-            child = add_child(net, nodes, first_with_marking, node, transition)
+            child = builder.add_child(node, transition)
             if not child.is_duplicate:
-                queue.append(child.id)
+                queue.append(child)
 
-    return CoverabilityTree(net.places, net.transitions, tuple(nodes))
+    return builder.tree()
 
 
-def _path(nodes: list[TreeNode], node: TreeNode) -> list[TreeNode]:
-    path = [node]
-    while path[-1].parent is not None:
-        path.append(nodes[path[-1].parent])
-    path.reverse()
-    return path
+def vertex_name(vertex: int) -> str:
+    return f"M{vertex}"
 
 
 @dataclass(frozen=True)
@@ -181,8 +217,21 @@ class CoverabilityGraph:
     edges: tuple[tuple[int, str, int], ...]
     initial: int = 0
 
+    @cached_property
+    def _successors_by_vertex(self) -> dict[int, list[int]]:
+        index: dict[int, list[int]] = {vertex: [] for vertex in self.markings}
+        for source, _, target in self.edges:
+            index[source].append(target)
+        return index
+
+    @cached_property
+    def self_loops(self) -> frozenset[int]:
+        """Vertices with an arc to themselves."""
+        return frozenset(source for source, _, target in self.edges if source == target)
+
     def successors(self, vertex: int) -> list[int]:
-        return [target for source, _, target in self.edges if source == vertex]
+        """Targets of the arcs leaving `vertex` (the index is built once per graph)."""
+        return list(self._successors_by_vertex[vertex])
 
     def to_directed_graph(self) -> DirectedGraph:
         graph = DirectedGraph()
@@ -191,10 +240,6 @@ class CoverabilityGraph:
         for source, _, target in self.edges:
             graph.add_edge(vertex_name(source), vertex_name(target))
         return graph
-
-
-def vertex_name(vertex: int) -> str:
-    return f"M{vertex}"
 
 
 def build_coverability_graph(tree: CoverabilityTree) -> CoverabilityGraph:
@@ -209,26 +254,33 @@ def build_coverability_graph(tree: CoverabilityTree) -> CoverabilityGraph:
 
 
 def coverability_components(graph: CoverabilityGraph) -> list[list[int]]:
-    """Strongly connected components of the coverability graph (Tarjan), as vertex ids."""
+    """Strongly connected components of the coverability graph (Tarjan), as vertex ids.
+
+    The components are in topological order: every arc between two components goes from an
+    earlier one to a later one. Every marking is reachable from the initial marking, so the
+    first component is the one that contains it and the terminal components come last.
+    Tarjan's algorithm emits them in the opposite order, so the list is reversed.
+    """
+    ids = {vertex_name(vertex): vertex for vertex in graph.markings}
     components = strongly_connected_components(graph.to_directed_graph())
-    return [[int(name.removeprefix("M")) for name in component] for component in components]
+    components.reverse()
+    return [[ids[name] for name in component] for component in components]
 
 
 def is_cyclic_component(graph: CoverabilityGraph, component: list[int]) -> bool:
     """A component is cyclic when it has several vertices or a vertex with a self-loop."""
-    return len(component) > 1 or any(
-        source == target for source, _, target in graph.edges if source == component[0]
-    )
+    return len(component) > 1 or component[0] in graph.self_loops
 
 
 def terminal_components(graph: CoverabilityGraph, components: list[list[int]]) -> list[list[int]]:
     """Components with no arc leaving them: once reached, the net never leaves them."""
-    terminal = []
-    for component in components:
-        members = set(component)
-        if all(target in members for source, _, target in graph.edges if source in members):
-            terminal.append(component)
-    return terminal
+    component_of = {vertex: i for i, component in enumerate(components) for vertex in component}
+    with_exit = {
+        component_of[source]
+        for source, _, target in graph.edges
+        if component_of[source] != component_of[target]
+    }
+    return [component for i, component in enumerate(components) if i not in with_exit]
 
 
 def dead_markings(graph: CoverabilityGraph) -> list[int]:

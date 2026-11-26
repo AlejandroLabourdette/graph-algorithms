@@ -2,10 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from graph_algorithms.cli.petri_v2 import format_omegas, format_tree, main
+from graph_algorithms.cli.petri_cover import format_omegas, format_tree, main
 from graph_algorithms.petri import PetriNet
-from graph_algorithms.petri_v2 import (
+from graph_algorithms.petri_cover import (
     OMEGA,
+    TreeBuilder,
+    TreeNode,
     accelerate,
     build_coverability_graph,
     build_coverability_tree,
@@ -13,11 +15,12 @@ from graph_algorithms.petri_v2 import (
     dead_markings,
     format_marking,
     is_bounded,
+    is_cyclic_component,
     is_safe,
     place_bounds,
     terminal_components,
 )
-from graph_algorithms.render import render_coverability_graph, render_coverability_tree
+from graph_algorithms.render_cover import render_coverability_graph, render_coverability_tree
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -88,15 +91,23 @@ def test_duplicates_are_leaves():
             assert tree.children(node.id) == []
 
 
+def test_children_come_from_an_index_in_creation_order():
+    tree = build_coverability_tree(PetriNet.from_text(BUFFER))
+
+    assert [child.id for child in tree.children(1)] == [2, 3]
+    assert tree.children(4) == []
+    assert tree.path_to(4)[0].id == 0 and [n.id for n in tree.path_to(4)] == [0, 1, 2, 4]
+
+
 def test_omega_appears_when_a_marking_covers_an_ancestor():
     tree = build_coverability_tree(PetriNet.from_text(UNBOUNDED))
 
     markings = {node.id: node.marking for node in tree.nodes}
     assert markings[1] == (1, OMEGA, 0)  # arrive from (1, 0, 0): queue grew
-    assert markings[3] == (1, OMEGA, OMEGA)  # serve: done grew over the root, queue stays omega
-    arrive = tree.nodes[1]
-    assert [(a.ancestor, a.places) for a in arrive.accelerations] == [(0, (1,))]
-    assert [(a.ancestor, a.places) for a in tree.nodes[3].accelerations] == [(0, (2,))]
+    assert markings[3] == (1, OMEGA, OMEGA)  # serve: done grew, queue stays omega
+    assert [(a.ancestor, a.places) for a in tree.nodes[1].accelerations] == [(0, (1,))]
+    # M3 covers both M1 and the root: the nearest ancestor, M1, is the one reported.
+    assert [(a.ancestor, a.places) for a in tree.nodes[3].accelerations] == [(1, (2,))]
 
 
 def test_omega_arithmetic_keeps_omega():
@@ -106,17 +117,41 @@ def test_omega_arithmetic_keeps_omega():
     assert net.is_enabled((1, OMEGA, 0), "serve")
 
 
-def test_accelerate_compares_with_every_ancestor_until_nothing_changes():
-    tree = build_coverability_tree(PetriNet.from_text(BUFFER))
-    root, middle = tree.nodes[0], tree.nodes[1]
+def test_accelerate_scans_from_the_nearest_ancestor():
+    root = TreeNode(0, (2, 0), None, None, None, ())
+    middle = TreeNode(1, (1, 1), 0, "put", None, ())
 
-    # (2, 2) covers (2, 0) in `full`, which becomes omega; (2, ω) then covers (1, 1) in `free`.
+    # (2, 2) covers (1, 1) in both places: the nearest ancestor makes both of them omega.
     marking, accelerations = accelerate((2, 2), [root, middle])
 
     assert marking == (OMEGA, OMEGA)
-    assert [(a.ancestor, a.places) for a in accelerations] == [(0, (1,)), (1, (0,))]
+    assert [(a.ancestor, a.places) for a in accelerations] == [(1, (0, 1))]
     # An equal marking is not strictly greater: nothing changes.
     assert accelerate((2, 0), [root]) == ((2, 0), [])
+
+
+def test_accelerate_repeats_until_nothing_changes():
+    far = TreeNode(0, (1, 0), None, None, None, ())
+    near = TreeNode(1, (0, 5), 0, "t", None, ())
+
+    # (1, 3) does not cover (0, 5), but it covers (1, 0): place 1 becomes omega, and then
+    # (1, ω) covers (0, 5) in place 0.
+    marking, accelerations = accelerate((1, 3), [far, near])
+
+    assert marking == (OMEGA, OMEGA)
+    assert [(a.ancestor, a.places) for a in accelerations] == [(0, (1,)), (1, (0,))]
+
+
+def test_tree_builder_remembers_the_children_it_creates():
+    builder = TreeBuilder(PetriNet.from_text(BUFFER))
+    root = builder.root
+
+    assert builder.child(root, "put") is None
+    child = builder.add_child(root, "put")
+
+    assert builder.child(root, "put") is child
+    assert child.marking == (1, 1) and child.parent == 0
+    assert [node.id for node in builder.tree().nodes] == [0, 1]
 
 
 def test_graph_merges_duplicates_into_arcs_to_the_original_node():
@@ -126,6 +161,14 @@ def test_graph_merges_duplicates_into_arcs_to_the_original_node():
 
     assert graph.markings == {0: (2, 0), 1: (1, 1), 2: (0, 2)}
     assert graph.edges == ((0, "put", 1), (1, "put", 2), (1, "get", 0), (2, "get", 1))
+    assert graph.successors(1) == [2, 0]
+    assert graph.successors(2) == [1]
+
+
+def test_graph_knows_its_self_loops():
+    graph = build_coverability_graph(build_coverability_tree(PetriNet.from_text(UNBOUNDED)))
+
+    assert graph.self_loops == {1, 3}
 
 
 def test_components_of_the_coverability_graph():
@@ -133,8 +176,10 @@ def test_components_of_the_coverability_graph():
 
     components = coverability_components(graph)
 
-    # Each marking is its own component (the graph only moves "forward" through the omegas).
-    assert sorted(components) == [[0], [1], [3]]
+    # Each marking is its own component (the graph only moves "forward" through the omegas),
+    # numbered from the initial marking to the terminal component.
+    assert components == [[0], [1], [3]]
+    assert [is_cyclic_component(graph, c) for c in components] == [False, True, True]
     assert terminal_components(graph, components) == [[3]]
 
 
@@ -145,6 +190,7 @@ def test_buffer_is_a_single_cyclic_component():
 
     assert len(components) == 1
     assert sorted(components[0]) == [0, 1, 2]
+    assert is_cyclic_component(graph, components[0])
 
 
 def test_dead_markings_and_terminal_components():
@@ -154,6 +200,19 @@ def test_dead_markings_and_terminal_components():
 
     assert dead_markings(graph) == [3]
     assert terminal_components(graph, components) == [[3]]
+
+
+@pytest.mark.parametrize("example", sorted(EXAMPLES.glob("petri*.txt")), ids=lambda path: path.name)
+def test_components_are_in_topological_order(example):
+    net = PetriNet.from_text(example.read_text())
+    graph = build_coverability_graph(build_coverability_tree(net))
+
+    components = coverability_components(graph)
+
+    index = {vertex: i for i, component in enumerate(components) for vertex in component}
+    assert graph.initial in components[0]
+    assert all(index[source] <= index[target] for source, _, target in graph.edges)
+    assert sorted(index) == sorted(graph.markings)
 
 
 def test_bounds_of_a_bounded_net():
@@ -192,11 +251,11 @@ def test_cli_text_helpers():
     assert format_tree(tree)[:3] == [
         "M0 (1, 0, 0)",
         "  --arrive--> M1 (1, ω, 0)",
-        "    --arrive--> M2 (1, ω, 0)  duplicado de M1",
+        "    --arrive--> M2 (1, ω, 0)  duplicate of M1",
     ]
     assert format_omegas(tree) == [
-        "M1 cubre a su ancestro M0 (1, 0, 0): queue -> ω",
-        "M3 cubre a su ancestro M0 (1, 0, 0): done -> ω",
+        "M1 covers its ancestor M0 (1, 0, 0): queue -> ω",
+        "M3 covers its ancestor M1 (1, ω, 0): done -> ω",
     ]
 
 
@@ -209,7 +268,7 @@ def test_render_tree_shows_omegas_duplicates_and_dead_nodes():
 
     assert "penwidth=3" in lines["M0"]  # root
     assert "= M0" in lines["M2"] and "dashed" in lines["M2"]  # duplicate of the root
-    assert "muerto" in lines["M3"] and "#e53935" in lines["M3"]
+    assert "dead" in lines["M3"] and "#e53935" in lines["M3"]
     edges = [line.strip() for line in source.splitlines() if "->" in line]
     assert edges[0].startswith("M0 -> M1 [label=a")
 
@@ -217,6 +276,19 @@ def test_render_tree_shows_omegas_duplicates_and_dead_nodes():
         build_coverability_tree(PetriNet.from_text(UNBOUNDED))
     ).source
     assert "(1, ω, 0)" in omega_source and "#ffe0b2" in omega_source
+
+
+def test_render_tree_highlights_the_current_node_and_known_dead_nodes():
+    tree = build_coverability_tree(PetriNet.from_text(DEADLOCK))
+
+    source = render_coverability_tree(tree, current=1, dead=set()).source
+    lines = {
+        line.strip().split(" [")[0]: line for line in source.splitlines() if " [label=<" in line
+    }
+
+    assert "current" in lines["M1"] and "#2e7d32" in lines["M1"]
+    assert "current" not in lines["M0"]
+    assert "dead" not in source  # dead nodes are only the ones the caller passes
 
 
 def test_render_graph_draws_cyclic_components_as_clusters_and_dashes_other_arcs():
@@ -227,7 +299,7 @@ def test_render_graph_draws_cyclic_components_as_clusters_and_dashes_other_arcs(
 
     # M0 has a self-loop (c) so it is a cluster; M1 and the dead M3 are single plain nodes.
     assert source.count("subgraph cluster_") == 1
-    assert 'label="CFC' in source
+    assert 'label="SCC 1"' in source
     edges = {
         line.strip().split(" [")[0] + " " + line.split("label=")[1].split()[0]: line
         for line in source.splitlines()
@@ -238,6 +310,18 @@ def test_render_graph_draws_cyclic_components_as_clusters_and_dashes_other_arcs(
     assert "dashed" not in edges["M0 -> M0 c"]
 
 
+def test_render_graph_merges_parallel_arcs_into_one_labelled_arc():
+    graph = build_coverability_graph(build_coverability_tree(PetriNet.from_text(UNBOUNDED)))
+    components = coverability_components(graph)
+
+    source = render_coverability_graph(graph, components).source
+
+    # M3 has two self-loops, `arrive` and `serve`: one arc, labelled with both.
+    loops = [line for line in source.splitlines() if "M3 -> M3" in line]
+    assert len(loops) == 1
+    assert 'label="arrive, serve"' in loops[0]
+
+
 def test_cli_prints_the_analysis_and_writes_both_images(tmp_path, capsys):
     input_file = tmp_path / "net.txt"
     input_file.write_text(UNBOUNDED)
@@ -245,13 +329,13 @@ def test_cli_prints_the_analysis_and_writes_both_images(tmp_path, capsys):
     main([str(input_file), "-o", str(tmp_path / "out")])
 
     out = capsys.readouterr().out
-    assert "Árbol de cobertura: 6 nodos, 3 duplicados (no se expanden)" in out
+    assert "Coverability tree: 6 nodes, 3 duplicates (not expanded)" in out
     assert "Omegas: 2" in out
-    assert "queue: no acotado (ω)" in out
-    assert "La red es acotada: no" in out
-    assert "Lugares no acotados: queue, done" in out
-    assert (tmp_path / "out_arbol.svg").read_text().startswith("<?xml")
-    assert (tmp_path / "out_grafo.svg").read_text().startswith("<?xml")
+    assert "queue: unbounded (ω)" in out
+    assert "Net is bounded: no" in out
+    assert "Unbounded places: queue, done" in out
+    assert (tmp_path / "out_tree.svg").read_text().startswith("<?xml")
+    assert (tmp_path / "out_graph.svg").read_text().startswith("<?xml")
 
 
 def test_cli_reports_a_bounded_net(tmp_path, capsys):
@@ -261,19 +345,32 @@ def test_cli_reports_a_bounded_net(tmp_path, capsys):
     main([str(input_file), "-o", str(tmp_path / "out")])
 
     out = capsys.readouterr().out
-    assert "Omegas: ninguno" in out
-    assert "free: acotado (cota 2)" in out
-    assert "La red es acotada: sí" in out
-    assert "La red es segura (1-acotada): no" in out
-    assert "Marcados muertos: ninguno" in out
+    assert "Omegas: none" in out
+    assert "free: 2-bounded" in out
+    assert "Net is bounded: yes" in out
+    assert "Net is safe (1-bounded): no" in out
+    assert "Dead markings: none" in out
+
+
+def test_cli_numbers_the_components_from_the_initial_marking(tmp_path, capsys):
+    input_file = tmp_path / "net.txt"
+    input_file.write_text(DEADLOCK)
+
+    main([str(input_file), "-o", str(tmp_path / "out")])
+
+    out = capsys.readouterr().out
+    assert "SCC 1: M0 (1, 0)  [cyclic]" in out
+    assert "SCC 2: M1 (0, 1)\n" in out
+    assert "SCC 3: M3 (0, 0)  [terminal]" in out
+    assert "Dead markings: M3" in out
 
 
 @pytest.mark.parametrize("example", sorted(EXAMPLES.glob("petri*.txt")), ids=lambda path: path.name)
 def test_examples_terminate_and_render(example, tmp_path):
     main([str(example), "-o", str(tmp_path / example.stem)])
 
-    assert (tmp_path / f"{example.stem}_arbol.svg").exists()
-    assert (tmp_path / f"{example.stem}_grafo.svg").exists()
+    assert (tmp_path / f"{example.stem}_tree.svg").exists()
+    assert (tmp_path / f"{example.stem}_graph.svg").exists()
 
 
 def feed_input(monkeypatch, *answers: str) -> None:
@@ -293,21 +390,21 @@ def test_interactive_builds_the_tree_step_by_step(tmp_path, monkeypatch, capsys)
     input_file.write_text(UNBOUNDED)
     feed_input(monkeypatch, "arrive", "arrive", "serve", "q")
 
-    main([str(input_file), "-i", "-o", str(tmp_path / "out")])
+    main([str(input_file), "--interactive", "-o", str(tmp_path / "out")])
 
     out = capsys.readouterr().out
-    assert "Nodo actual: M0 (1, 0, 0)" in out
-    assert "Transiciones habilitadas: arrive\n" in out  # serve needs a job in the queue
+    assert "Current node: M0 (1, 0, 0)" in out
+    assert "Enabled transitions: arrive\n" in out  # serve needs a job in the queue
     assert "arrive: (1, 0, 0) -> (1, ω, 0)  [M1]" in out
-    assert "Omega nuevo: M1 cubre a su ancestro M0 (1, 0, 0): queue -> ω" in out
-    assert "Duplicado de M1: no se expande, se regresa a M1" in out
+    assert "New omega: M1 covers its ancestor M0 (1, 0, 0): queue -> ω" in out
+    assert "Duplicate of M1: not expanded, back to M1" in out
     assert "serve: (1, ω, 0) -> (1, ω, ω)  [M3]" in out
-    assert "Omega nuevo: M3 cubre a su ancestro M0 (1, 0, 0): done -> ω" in out
-    assert "Camino desde la raíz: M0 -> M1 -> M3" in out
-    assert "Árbol construido: 4 nodos, 1 duplicados (no se expanden)" in out
+    assert "New omega: M3 covers its ancestor M1 (1, ω, 0): done -> ω" in out
+    assert "Path from the root: M0 -> M1 -> M3" in out
+    assert "Tree built: 4 nodes, 1 duplicates (not expanded)" in out
     assert "Omegas: 2" in out
-    assert (tmp_path / "out_arbol.svg").read_text().startswith("<?xml")
-    assert not (tmp_path / "out_grafo.svg").exists()
+    assert (tmp_path / "out_tree.svg").read_text().startswith("<?xml")
+    assert not (tmp_path / "out_graph.svg").exists()
 
 
 def test_interactive_reports_invalid_choices_and_goes_back(tmp_path, monkeypatch, capsys):
@@ -318,11 +415,29 @@ def test_interactive_reports_invalid_choices_and_goes_back(tmp_path, monkeypatch
     main([str(input_file), "-i", "-o", str(tmp_path / "out")])
 
     out = capsys.readouterr().out
-    assert "get no está habilitada" in out
-    assert "transición desconocida 'zzz'" in out
-    assert "Nodo actual: M1 (1, 1)" in out
-    assert out.index("Nodo actual: M1 (1, 1)") < out.index("Ya estás en la raíz")
-    assert "Árbol construido: 2 nodos, 0 duplicados (no se expanden)" in out
+    assert "get is not enabled" in out
+    assert "unknown transition 'zzz'" in out
+    assert "Current node: M1 (1, 1)" in out
+    assert out.index("Current node: M1 (1, 1)") < out.index("Already at the root")
+    assert "Tree built: 2 nodes, 0 duplicates (not expanded)" in out
+
+
+def test_interactive_firing_a_transition_again_moves_to_the_existing_child(
+    tmp_path, monkeypatch, capsys
+):
+    input_file = tmp_path / "net.txt"
+    input_file.write_text(BUFFER)
+    feed_input(monkeypatch, "put", "r", "put", "r", "put", "q")
+
+    main([str(input_file), "-i", "-o", str(tmp_path / "out")])
+
+    out = capsys.readouterr().out
+    # The same `put` from M0 is fired three times but only creates one child.
+    assert out.count("put: (2, 0) -> (1, 1)  [M1]") == 3
+    assert out.count("(already in the tree)") == 2
+    assert "Tree built: 2 nodes, 0 duplicates (not expanded)" in out
+    source = (tmp_path / "out_tree.svg").read_text()
+    assert source.count("<title>M0&#45;&gt;M1</title>") == 1
 
 
 def test_interactive_marks_a_dead_marking_and_lets_the_user_leave(tmp_path, monkeypatch, capsys):
@@ -333,10 +448,9 @@ def test_interactive_marks_a_dead_marking_and_lets_the_user_leave(tmp_path, monk
     main([str(input_file), "-i", "-o", str(tmp_path / "out")])
 
     out = capsys.readouterr().out
-    assert "Nodo actual: M2 (0, 0)" in out
-    assert "Marcado muerto: ninguna transición habilitada\n" in out
-    source = (tmp_path / "out_arbol.svg").read_text()
-    assert "muerto" in source
+    assert "Current node: M2 (0, 0)" in out
+    assert "Dead marking: no transition is enabled\n" in out
+    assert "dead" in (tmp_path / "out_tree.svg").read_text()
 
 
 def test_interactive_ends_when_the_initial_marking_is_dead(tmp_path, monkeypatch, capsys):
@@ -346,17 +460,4 @@ def test_interactive_ends_when_the_initial_marking_is_dead(tmp_path, monkeypatch
 
     main([str(input_file), "-i", "-o", str(tmp_path / "out")])
 
-    assert "ninguna transición habilitada desde el inicio" in capsys.readouterr().out
-
-
-def test_render_tree_highlights_the_current_node_and_known_dead_nodes():
-    tree = build_coverability_tree(PetriNet.from_text(DEADLOCK))
-
-    source = render_coverability_tree(tree, current=1, dead=set()).source
-    lines = {
-        line.strip().split(" [")[0]: line for line in source.splitlines() if " [label=<" in line
-    }
-
-    assert "actual" in lines["M1"] and "#2e7d32" in lines["M1"]
-    assert "actual" not in lines["M0"]
-    assert "muerto" not in source  # dead nodes are only the ones the caller passes
+    assert "no transition is enabled from the start" in capsys.readouterr().out

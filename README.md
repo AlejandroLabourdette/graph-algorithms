@@ -112,43 +112,47 @@ Examples in `examples/`:
 
 ### Petri net coverability analysis (Karp-Miller)
 
-Non-interactive analysis of a place/transition net (`graph_algorithms.petri_v2`) that uses the same
-input files as the token game. It builds the coverability tree, derives the coverability graph and
-analyses both, prints a report and renders two images: `<output>_arbol.<format>` and
-`<output>_grafo.<format>`. The report and the image labels are in Spanish.
+Non-interactive analysis of a place/transition net (`graph_algorithms.petri_cover`) that uses the
+same input files as the token game. It builds the coverability tree, derives the coverability graph
+and analyses both, prints a report and renders two images: `<output>_tree.<format>` and
+`<output>_graph.<format>`.
 
 ```sh
-uv run petri_v2 examples/petri4.txt          # writes output/petri4_arbol.svg and output/petri4_grafo.svg
-uv run petri_v2 examples/petri2.txt -f png -o output/parts
+uv run petri_cover examples/petri4.txt          # writes output/petri4_tree.svg and output/petri4_graph.svg
+uv run petri_cover examples/petri2.txt -f png -o output/parts
 ```
 
 - **Coverability tree.** The root is the initial marking and each enabled transition creates a
   child, breadth first. A child whose marking already appears in an earlier node is a
   *duplicate*: it stays in the tree as a leaf and is not expanded, so the tree is always finite.
-- **Omegas.** Each new marking is compared with the markings on the path from the root. If it
-  covers an ancestor (`>=` in every place) and differs from it, the places where it is strictly
-  greater can be pumped without limit and become **ω** (ω + n = ω, ω − n = ω, ω ≥ n). The report
-  lists every node that introduces omegas, the ancestor it covers and the places.
+- **Omegas.** Each new marking is compared with the markings on the path from the root, nearest
+  ancestor first. If it covers an ancestor (`>=` in every place) and differs from it, the places
+  where it is strictly greater can be pumped without limit and become **ω** (ω + n = ω,
+  ω − n = ω, ω ≥ n). The report lists every node that introduces omegas, the ancestor it covers
+  and the places.
 - **Coverability graph.** The tree with equal markings merged: duplicates become arcs back to the
-  node they repeat.
-- **Strongly connected components.** Tarjan's algorithm on the coverability graph. Cyclic
+  node they repeat. Parallel arcs are drawn as one arc labelled with all their transitions.
+- **Strongly connected components.** Tarjan's algorithm on the coverability graph, numbered in
+  topological order: SCC 1 holds the initial marking and the terminal components come last. Cyclic
   components are drawn as clusters; the report marks terminal components (no arc leaves them) and
   dead markings (no enabled transition).
 - **Boundedness.** A place is unbounded when ω appears in it; otherwise its bound is the most
   tokens it holds in any marking. The net is bounded when every place is, and safe when every
   bound is at most 1.
 
-With `-i` (`--interactivo`) the tree is built step by step instead: at each step it shows the
+With `-i` (`--interactive`) the tree is built step by step instead: at each step it shows the
 current node, the path from the root and the enabled transitions, and you type the one to fire.
 The new marking is compared with the path (omegas are announced as they appear) and a marking that
 already exists is reported as a duplicate, which is not expanded and sends you back to its parent.
-Type `r` to go back to the parent and explore another branch, or `q` to quit; the tree
-`<output>_arbol.<format>` is redrawn at every step, with the current node in green. On exit it
-prints the tree built so far and its omegas.
+Firing a transition that was already fired from the current node moves to the child that exists
+instead of adding another one. Type `r` to go back to the parent and explore another branch, or
+`q` to quit; the tree `<output>_tree.<format>` is redrawn at every step, with the current node in
+green. On exit it prints the tree built so far and its omegas.
 
 ```sh
-uv run petri_v2 examples/petri.txt -i -f png -o output/buffer
+uv run petri_cover examples/petri.txt -i -f png -o output/buffer
 ```
 
 In the images, markings with an ω are orange, duplicates are dashed gray leaves labelled with the
-node they repeat (`= M3`), dead markings (`muerto`) have a red border and the initial marking a thick border.
+node they repeat (`= M3`), dead markings are labelled `dead` and have a red border, and the
+initial marking has a thick border.
