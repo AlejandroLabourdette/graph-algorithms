@@ -7,6 +7,7 @@ from graph_algorithms.petri import PetriNet
 from graph_algorithms.petri_cover import (
     CoverabilityGraph,
     CoverabilityTree,
+    OmegaMarking,
     TreeBuilder,
     TreeNode,
     build_coverability_graph,
@@ -21,6 +22,7 @@ from graph_algorithms.petri_cover import (
     terminal_components,
     vertex_name,
 )
+from graph_algorithms.render import render_petri_net
 from graph_algorithms.render_cover import render_coverability_graph, render_coverability_tree
 
 
@@ -85,6 +87,23 @@ def format_components(graph: CoverabilityGraph, components: list[list[int]]) -> 
     return lines
 
 
+def write_net(
+    net: PetriNet,
+    output: Path,
+    image_format: str,
+    marking: OmegaMarking | None = None,
+    last_fired: str | None = None,
+) -> str:
+    """Draw the net itself and return the path of the image.
+
+    The net is drawn at `marking` (default: the initial marking), which may contain omegas, with
+    `last_fired` highlighted.
+    """
+    return render_petri_net(
+        net, net.initial_marking if marking is None else marking, last_fired
+    ).render(output.with_name(f"{output.name}_net"), format=image_format, cleanup=True)
+
+
 QUIT = "q"
 BACK = "r"
 PROMPT = f"Fire transition ({BACK} = back, {QUIT} = quit): "
@@ -107,11 +126,12 @@ def explore(net: PetriNet, output: Path, image_format: str) -> None:
     exists is a duplicate leaf, after which the exploration stays at the parent. Firing a
     transition that was already fired from the current node moves to the child that exists
     instead of adding another one. `r` goes back to the parent so that other branches can be
-    explored; the tree is redrawn at every step.
+    explored. At every step the tree (`<output>_tree`) and the net (`<output>_net`, at the current
+    marking with the transition that led to it highlighted) are redrawn.
     """
     builder = TreeBuilder(net)
     current = builder.root
-    rendered = ""
+    rendered = rendered_net = ""
 
     while True:
         tree = builder.tree()
@@ -121,12 +141,14 @@ def explore(net: PetriNet, output: Path, image_format: str) -> None:
             if not node.is_duplicate and not net.enabled_transitions(node.marking)
         }
         rendered = render_coverability_tree(tree, current=current.id, dead=dead).render(
-            output, format=image_format, cleanup=True
+            output.with_name(f"{output.name}_tree"), format=image_format, cleanup=True
         )
+        rendered_net = write_net(net, output, image_format, current.marking, current.transition)
         path = " -> ".join(vertex_name(node.id) for node in tree.path_to(current.id))
         print(f"\nCurrent node: {vertex_name(current.id)} {format_marking(current.marking)}")
         print(f"  Path from the root: {path}")
         print(f"  Tree written to {rendered}")
+        print(f"  Net written to {rendered_net}")
 
         enabled = net.enabled_transitions(current.marking)
         if enabled:
@@ -178,6 +200,7 @@ def explore(net: PetriNet, output: Path, image_format: str) -> None:
     for line in omegas:
         print(f"  {line}")
     print(f"Last tree written to {rendered}")
+    print(f"Last net written to {rendered_net}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -191,7 +214,7 @@ def main(argv: list[str] | None = None) -> None:
         "-o",
         "--output",
         type=Path,
-        help="output path without extension; '_tree' and '_graph' are appended "
+        help="output path without extension; '_net', '_tree' and '_graph' are appended "
         "(default: output/<input name>)",
     )
     parser.add_argument("-f", "--format", default="svg", choices=["svg", "png", "pdf"])
@@ -200,14 +223,14 @@ def main(argv: list[str] | None = None) -> None:
         "--interactive",
         action="store_true",
         help="build the tree step by step: choose the transition to fire at each step; "
-        "'<output>_tree' is redrawn after every step",
+        "'<output>_tree' and '<output>_net' are redrawn after every step",
     )
     args = parser.parse_args(argv)
 
     net = PetriNet.from_text(args.input.read_text())
     output = args.output or Path("output") / args.input.stem
     if args.interactive:
-        explore(net, output.with_name(f"{output.name}_tree"), args.format)
+        explore(net, output, args.format)
         return
 
     tree = build_coverability_tree(net)
@@ -218,6 +241,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Places: {', '.join(net.places)}")
     print(f"Transitions: {', '.join(net.transitions)}")
     print(f"Initial marking: {format_marking(net.initial_marking)}")
+    print(f"Petri net written to {write_net(net, output, args.format)}")
 
     duplicates = sum(node.is_duplicate for node in tree.nodes)
     print(f"\nCoverability tree: {len(tree.nodes)} nodes, {duplicates} duplicates (not expanded)")

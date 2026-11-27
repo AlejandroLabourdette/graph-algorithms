@@ -1,6 +1,7 @@
 """Graphviz rendering of graphs, their components and Petri nets."""
 
 import html
+import math
 
 import graphviz
 
@@ -98,9 +99,14 @@ ARC_COLOR = "#616161"
 MAX_TOKEN_DOTS = 4
 
 
+def _format_tokens(tokens: float) -> str:
+    """Token count as text; an infinite count (omega, in coverability markings) is written ω."""
+    return "ω" if math.isinf(tokens) else str(tokens)
+
+
 def _place_label(place: str, tokens: int) -> str:
     """HTML-like label with the place name above its tokens."""
-    marks = str(tokens) if tokens > MAX_TOKEN_DOTS else "●" * tokens
+    marks = _format_tokens(tokens) if tokens > MAX_TOKEN_DOTS else "●" * tokens
     return f'<{html.escape(place)}<BR/><FONT POINT-SIZE="18">{marks or " "}</FONT>>'
 
 
@@ -123,7 +129,7 @@ def render_petri_net(
         nodesep="0.5",
         ranksep="0.7",
         dpi="150",
-        label=f"M = ({', '.join(map(str, marking))})",
+        label=f"M = ({', '.join(map(_format_tokens, marking))})",
         labelloc="t",
         fontname="Helvetica-Bold",
         fontsize="14",

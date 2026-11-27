@@ -20,6 +20,7 @@ from graph_algorithms.petri_cover import (
     place_bounds,
     terminal_components,
 )
+from graph_algorithms.render import render_petri_net
 from graph_algorithms.render_cover import render_coverability_graph, render_coverability_tree
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -322,7 +323,7 @@ def test_render_graph_merges_parallel_arcs_into_one_labelled_arc():
     assert 'label="arrive, serve"' in loops[0]
 
 
-def test_cli_prints_the_analysis_and_writes_both_images(tmp_path, capsys):
+def test_cli_prints_the_analysis_and_writes_the_net_the_tree_and_the_graph(tmp_path, capsys):
     input_file = tmp_path / "net.txt"
     input_file.write_text(UNBOUNDED)
 
@@ -334,6 +335,8 @@ def test_cli_prints_the_analysis_and_writes_both_images(tmp_path, capsys):
     assert "queue: unbounded (ω)" in out
     assert "Net is bounded: no" in out
     assert "Unbounded places: queue, done" in out
+    assert f"Petri net written to {tmp_path / 'out_net.svg'}" in out
+    assert (tmp_path / "out_net.svg").read_text().startswith("<?xml")
     assert (tmp_path / "out_tree.svg").read_text().startswith("<?xml")
     assert (tmp_path / "out_graph.svg").read_text().startswith("<?xml")
 
@@ -369,6 +372,7 @@ def test_cli_numbers_the_components_from_the_initial_marking(tmp_path, capsys):
 def test_examples_terminate_and_render(example, tmp_path):
     main([str(example), "-o", str(tmp_path / example.stem)])
 
+    assert (tmp_path / f"{example.stem}_net.svg").exists()
     assert (tmp_path / f"{example.stem}_tree.svg").exists()
     assert (tmp_path / f"{example.stem}_graph.svg").exists()
 
@@ -403,7 +407,9 @@ def test_interactive_builds_the_tree_step_by_step(tmp_path, monkeypatch, capsys)
     assert "Path from the root: M0 -> M1 -> M3" in out
     assert "Tree built: 4 nodes, 1 duplicates (not expanded)" in out
     assert "Omegas: 2" in out
+    assert f"  Net written to {tmp_path / 'out_net.svg'}" in out
     assert (tmp_path / "out_tree.svg").read_text().startswith("<?xml")
+    assert "M = (1, ω, ω)" in (tmp_path / "out_net.svg").read_text()  # net at the last node
     assert not (tmp_path / "out_graph.svg").exists()
 
 
@@ -461,3 +467,33 @@ def test_interactive_ends_when_the_initial_marking_is_dead(tmp_path, monkeypatch
     main([str(input_file), "-i", "-o", str(tmp_path / "out")])
 
     assert "no transition is enabled from the start" in capsys.readouterr().out
+
+
+def test_interactive_redraws_the_net_at_the_current_marking(tmp_path, monkeypatch, capsys):
+    input_file = tmp_path / "net.txt"
+    input_file.write_text(BUFFER)
+    net_file = tmp_path / "out_net.svg"
+    seen = []
+
+    def fake_input(prompt: str) -> str:
+        seen.append(net_file.read_text())  # the net as drawn when the prompt is shown
+        return ("put", "r", "q")[len(seen) - 1]
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    main([str(input_file), "-i", "-o", str(tmp_path / "out")])
+
+    assert "M = (2, 0)" in seen[0] and "#fb8c00" not in seen[0]  # initial marking, nothing fired
+    assert "M = (1, 1)" in seen[1] and "#fb8c00" in seen[1]  # after `put`, `put` highlighted
+    assert "M = (2, 0)" in net_file.read_text()  # back at the root
+    assert "Last net written to" in capsys.readouterr().out
+
+
+def test_net_drawing_writes_omega_instead_of_infinity():
+    net = PetriNet.from_text(UNBOUNDED)
+
+    source = render_petri_net(net, (1, OMEGA, 0)).source
+
+    assert "M = (1, ω, 0)" in source
+    assert 'POINT-SIZE="18">ω</FONT>' in source  # the queue place holds ω
+    assert "inf" not in source

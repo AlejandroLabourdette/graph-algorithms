@@ -114,11 +114,13 @@ Examples in `examples/`:
 
 Non-interactive analysis of a place/transition net (`graph_algorithms.petri_cover`) that uses the
 same input files as the token game. It builds the coverability tree, derives the coverability graph
-and analyses both, prints a report and renders two images: `<output>_tree.<format>` and
-`<output>_graph.<format>`.
+and analyses both, prints a report and renders three images: the net itself at its initial
+marking (`<output>_net.<format>`, drawn like in the token game), the coverability tree
+(`<output>_tree.<format>`) and the coverability graph with its strongly connected components
+(`<output>_graph.<format>`).
 
 ```sh
-uv run petri_cover examples/petri4.txt          # writes output/petri4_tree.svg and output/petri4_graph.svg
+uv run petri_cover examples/petri4.txt          # writes output/petri4_net.svg, output/petri4_tree.svg and output/petri4_graph.svg
 uv run petri_cover examples/petri2.txt -f png -o output/parts
 ```
 
@@ -147,7 +149,9 @@ already exists is reported as a duplicate, which is not expanded and sends you b
 Firing a transition that was already fired from the current node moves to the child that exists
 instead of adding another one. Type `r` to go back to the parent and explore another branch, or
 `q` to quit; the tree `<output>_tree.<format>` is redrawn at every step, with the current node in
-green. On exit it prints the tree built so far and its omegas.
+green, and the net `<output>_net.<format>` is redrawn at the current marking with the transition
+that led to it highlighted (an ω is written as ω). On exit it prints the tree built so far and its
+omegas.
 
 ```sh
 uv run petri_cover examples/petri.txt -i -f png -o output/buffer
