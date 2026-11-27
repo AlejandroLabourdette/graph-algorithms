@@ -1,0 +1,17 @@
+# Unbounded queue: `arrive` creates a job without consuming anything but the idle token
+# (idle -> idle + queue), so the queue grows forever; `serve` moves jobs to done, which
+# grows forever too. The coverability tree needs two steps of omegas: queue first, then done.
+pre
+          t1  t2
+p1        1       0
+p2       0       1
+p3        0       0
+
+post
+          t1  t2
+p1        1       0
+p2       1       0
+p3        0       1
+
+marking
+1 0 0

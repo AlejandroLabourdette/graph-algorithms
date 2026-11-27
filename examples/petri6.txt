@@ -1,0 +1,16 @@
+# Bounded buffer with two slots: put fills a slot, get frees it. Bounded (2) but not safe;
+# the three reachable markings form a single strongly connected component.
+pre
+    t1 t2 t3 t4
+p1  1 0 0 0
+p2  0 1 0 1
+p3  0 0 1 1
+
+post
+    t1 t2 t3 t4
+p1  0 0 1 3 
+p2  1 0 0 0
+p3  0 1 0 0
+
+marking
+2 0 0
